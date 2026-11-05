@@ -1,0 +1,9 @@
+interface:
+  display_name: "Akamai Error Investigation"
+  short_description: "Turn an Akamai Reference ID into an Akatec-ready case record and analysis"
+  default_prompt: "Use $error-investigation to investigate this Akamai Reference ID."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "akamai_mcp_gateway"
+      description: "Akamai Edge Diagnostics (error translation) and, when available, App & API Protector read tools"
