@@ -1,6 +1,6 @@
 ---
 name: error-investigation
-description: Translate an Akamai Reference ID (`Reference #18.xxxx…` from an Akamai error page) or Global Request Number into an Akatec-ready case record (JSON facts plus edge logs) and an evidence-based analysis, via the Akamai MCP Server. Use when the user pastes a Reference ID or an Akamai error page, or asks why a request got an Akamai error.
+description: Translate an Akamai Reference ID (`Reference #18.xxxx…` from an Akamai error page) or Global Request Number into an Akatec-ready case record (JSON facts plus edge logs) and an evidence-based analysis, via the Akamai MCP Server. Use when the user pastes a Reference ID or an Akamai error page, or asks why a request got an Akamai error. Assumes Akamai's production network; the user adds the word `staging` for a request made on the staging network.
 ---
 
 # Error Investigation
@@ -24,16 +24,18 @@ Check these when a call fails:
 
 **No Reference ID?** If the user's message doesn't contain a Reference ID, ask for one and stop. Tell them it's at the bottom of the Akamai error page and looks like `Reference #18.xxxxxxxx.xxxxxxxxxx.xxxxxxxx`. Never use an ID from this file, the script, or an earlier conversation the user didn't point to.
 
+**Which network?** The skill assumes the request ran on Akamai's **production** network. Only if the user's message contains the word `staging`, for example `/error-investigation staging Reference #18.…`, treat it as a **staging** request. Never decide the network any other way. If you got it wrong, the script's network check will say so.
+
 How you call Akamai depends on how the Akamai MCP Server is exposed in this session.
 
 **A. The server has an `execute` tool** (it runs Python scripts that call `call_tool`). Read `scripts/case_record.py`, which sits next to this file, and run it twice per Reference ID. Each time, pass the whole file as `code`.
 
-The script has a marked block at the top with two lines: `REFERENCE_ID` and `REQUEST_ID`. **Change only those two lines.** Don't remove comments, shorten functions, or edit anything else.
+The script has a marked block at the top with three lines: `REFERENCE_ID`, `REQUEST_ID` and `STATED_NETWORK`. **Change only those three lines.** Don't remove comments, shorten functions, or edit anything else.
 
-1. **Run 1:** set `REFERENCE_ID` to the Reference ID exactly as the user gave it, `Reference #` included. Leave `REQUEST_ID = None`.
+1. **Run 1:** set `REFERENCE_ID` to the Reference ID exactly as the user gave it, `Reference #` included, without the word `staging`. Leave `REQUEST_ID = None`. Set `STATED_NETWORK = "staging"` only if the user wrote `staging`; otherwise leave it `"production"`.
    - The script normalizes the ID, checks its age, starts the translation and polls for about 20 s.
    - It returns `status` and `request_id`.
-2. **Run 2:** keep the same `REFERENCE_ID`, and set `REQUEST_ID` to the `request_id` number from run 1.
+2. **Run 2:** keep the same `REFERENCE_ID` and `STATED_NETWORK`, and set `REQUEST_ID` to the `request_id` number from run 1.
    - The script fetches the translation, runs the WAF lookups and returns the finished case record.
    - If it returns `status` `IN_PROGRESS`, run run 2 again unchanged. Never go back to run 1 for the same ID.
 
@@ -45,7 +47,7 @@ The two runs exist because one run that does both exceeds `execute`'s time limit
 3. **Translate:** call `ediag_translate_err_str` with `error_code` and `trace_forward_logs: true`.
 4. **Poll:** while the status is `IN_PROGRESS`, wait `retryAfter` seconds, then call `ediag_check_translate_err_status` with `request_id`.
 5. **Look up the WAF details** if `wafDetails` is present and the `aap_manage_*` tools exist. Use the same three `"operation": "get"` calls as `waf_block()`. If those tools are missing, keep the IDs parsed from `wafDetails`/`wafDetailsUrl` and leave the names `null`.
-6. **Build the record** with exactly the field mapping in `case_record()`, `edge_logs()` and `decode_status()`.
+6. **Build the record** with exactly the field mapping in `case_record()`, `edge_logs()`, `decode_status()` and `network_check()`.
 
 **Guardrail:** call the `aap_manage_*` tools only with `"operation": "get"`, because they can also create and update.
 
@@ -75,13 +77,18 @@ Build the analysis only from the case record. Work through these lenses and keep
   - For a WAF block, read `rule_conditions` literally and state what the rule matches. Is it narrow (a specific header, IP or pattern) or a blanket match, such as `/*` on a list of hosts?
   - If the rule is a blanket block on hostnames that serve real traffic, legitimate traffic must avoid it some other way: another policy, an exception, or an allow list. Say this, and label it an inference.
 - **Who the client was.** Use `user_agent`, `method`, `client_location` and whether `referer`/`cookie` appear in the edge logs. Does this client fit what the hostname and path are for? For example, a desktop browser calling a console API with no cookie looks like a manual test, not a real user. If `request_time` is only minutes before `checked_at_epoch`, it may be the user's own reproduction.
-- **Change context.**
-  - For a WAF block, read `waf.served_by_network` first. It says which Akamai network evaluated the request, and its `basis` says why.
-    - `production`: the request ran on the production network. A different staging version didn't evaluate it and can't explain it. Mention the staging version only as "a newer version exists on staging"; don't say what it changes.
-    - `staging`: the request ran on the staging network, so it tested the staged version, not what real users get.
-    - `unknown`: say so and quote the `basis`. Don't guess the network.
-  - Then compare `security_config_version` with the production and staging versions. All three equal means no pending security change.
-  - For other errors, say whether the record holds any change evidence.
+- **Network and change context.** `stated_network` is the network the analysis assumes: `production` by default, `staging` when the user said so.
+  - **For a WAF block, read `waf.network_check`:**
+    - `consistent: true`: the version that fired matches the stated network. Say so.
+    - `consistent: false`: the evidence contradicts the stated network. Quote the `basis`. If the stated network is production, tell the user the request likely ran on staging and to rerun the skill with `staging` next to the Reference ID. If it's staging, say the request likely didn't reach the staging network.
+    - `consistent: null`: the version can't show the network. Quote the `basis` and keep the stated network.
+  - **On production:** a different staging version didn't evaluate the request and can't explain it. Mention it only as "a newer version exists on staging"; don't say what it changes.
+  - **On staging:** read `waf.network_check.staging_vs_production`.
+    - `same`: staging runs the production version, so the result matches what production users get.
+    - `greater`: staging runs a newer version than production. The request tested a change that isn't live yet.
+    - `lower`: staging runs an older version than production. The request didn't test what's live.
+  - All three versions equal means no pending security change.
+  - **For other errors**, the record holds no version evidence. Say whether it holds any change evidence. On staging, the property's own staging version isn't in the record, so name it as a missing fact if the verdict depends on it.
 
 Write each point as **fact (cite the field) → what it means**.
 

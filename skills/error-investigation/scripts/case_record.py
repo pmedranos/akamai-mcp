@@ -3,21 +3,23 @@
 # Runs inside the Akamai MCP Server's `execute` sandbox, which provides
 # call_tool(name, params). Two runs per Reference ID, because translating
 # with forward logs plus the WAF lookups doesn't fit one run's time limit:
-#   Run 1: set REFERENCE_ID, leave REQUEST_ID = None -> returns status + request_id
-#   Run 2: also set REQUEST_ID to run 1's request_id   -> returns the case record
+#   Run 1: set REFERENCE_ID (and STATED_NETWORK), leave REQUEST_ID = None -> returns status + request_id
+#   Run 2: also set REQUEST_ID to run 1's request_id                       -> returns the case record
 #
 # When `execute` isn't available (tools are exposed directly), this file
 # is the spec: make the same tool calls and apply the same field mapping.
 
-# ===================== EDIT ONLY THESE TWO LINES =====================
+# ==================== EDIT ONLY THESE THREE LINES ====================
 REFERENCE_ID = "<paste the Reference ID exactly as the user gave it>"
 REQUEST_ID = None  # Run 1: None. Run 2: the request_id number from run 1.
+STATED_NETWORK = "production"  # "staging" only if the user wrote "staging" with the ID.
 # ============== DO NOT CHANGE ANYTHING BELOW THIS LINE ===============
 
 import html, re, time
 from urllib.parse import urlsplit
 
 MAX_AGE_S = 48 * 3600  # Edge Diagnostics translates Reference IDs for 48 h only
+NETWORK = "staging" if str(STATED_NETWORK).strip().lower() == "staging" else "production"
 
 
 def normalize(raw):
@@ -60,21 +62,38 @@ def edge_logs(res):
     return out
 
 
-def served_by_network(ver, prod, stg):
-    """Which Akamai network evaluated the request, inferred from the WAF version that fired.
+def compare(a, b):
+    if a is None or b is None:
+        return None
+    return "same" if a == b else ("greater" if a > b else "lower")
 
-    The translation has no network field, so this is the only signal. It compares
-    against the versions active at check time, not at request time.
+
+def network_check(stated, ver, prod, stg):
+    """Check the network the user stated against the WAF version that fired.
+
+    The translation has no network field. The skill assumes production unless the
+    user says staging; this only flags when the evidence contradicts that. Versions
+    are the ones active at check time, not at request time.
     """
+    out = {"stated_network": stated,
+           "staging_vs_production": compare(stg, prod) if stated == "staging" else None,
+           "consistent": None, "basis": None}
     if ver is None or (ver != prod and ver != stg):
-        return {"network": "unknown", "basis": "the version that fired is active on neither network now"}
-    if ver == prod and ver == stg:
-        return {"network": "unknown", "basis": "production and staging run the same version, so either could have served it"}
-    net = "production" if ver == prod else "staging"
-    other = "staging" if net == "production" else "production"
-    return {"network": net,
-            "basis": f"version {ver} that fired is the {net} version; {other} runs "
-                     f"{stg if net == 'production' else prod}, which did not evaluate this request"}
+        out["basis"] = (f"version {ver} that fired is active on neither network now; "
+                        "an activation may have happened since the request")
+    elif prod == stg:
+        out["basis"] = (f"production and staging both run {prod}, so the version can't show "
+                        "the network; the WAF result is the same on either")
+    else:
+        fired_on = "production" if ver == prod else "staging"
+        out["consistent"] = fired_on == stated
+        if out["consistent"]:
+            out["basis"] = f"version {ver} that fired is the {stated} version"
+        else:
+            out["basis"] = (f"version {ver} that fired is the {fired_on} version, not the {stated} "
+                            f"version ({stg if stated == 'staging' else prod}); the request likely "
+                            f"ran on {fired_on}")
+    return out
 
 
 def waf_block(res):
@@ -85,7 +104,7 @@ def waf_block(res):
          "security_config_version": int(cm.group(2)) if cm else None,
          "security_config_production_version": None,
          "security_config_staging_version": None,
-         "served_by_network": None,
+         "network_check": None,
          "policy_id": policy_id or None, "policy_name": None,
          "rule_id": int(rule_id) if rule_id.isdigit() else (rule_id or None),
          "rule_name": None, "rule_conditions": None}
@@ -98,8 +117,8 @@ def waf_block(res):
     w["security_config_name"] = cd.get("name")
     w["security_config_production_version"] = cd.get("productionVersion")
     w["security_config_staging_version"] = cd.get("stagingVersion")
-    w["served_by_network"] = served_by_network(ver, w["security_config_production_version"],
-                                               w["security_config_staging_version"])
+    w["network_check"] = network_check(NETWORK, ver, w["security_config_production_version"],
+                                       w["security_config_staging_version"])
     if policy_id:
         p = call_tool("aap_manage_security_policies", {"operation": "get", "config_id": cid,
                       "version_number": ver, "policy_id": policy_id})
@@ -123,6 +142,7 @@ def case_record(rid, res):
     ip = lambda k: (res.get(k) or {}).get("ip")
     rec = {
         "reference": rid,
+        "stated_network": NETWORK,
         "hostname": u.hostname,
         "path": u.path or "/",
         "query": u.query,
