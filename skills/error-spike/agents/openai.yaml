@@ -1,0 +1,9 @@
+interface:
+  display_name: "Akamai Error Spike"
+  short_description: "Find when a Hostname's error rate rose above normal, which codes, and whether errors reached origin"
+  default_prompt: "Use $error-spike to check whether errors spiked on this Hostname."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "akamai_mcp_gateway"
+      description: "Akamai Reporting API v2 (delivery traffic report)"

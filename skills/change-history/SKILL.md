@@ -28,7 +28,8 @@ Check these when a call fails:
 - No time mentioned: leave `WINDOW_END = None` (now) and `WINDOW_DAYS = 7`.
 - "Last N days/hours": `WINDOW_END = None`, `WINDOW_DAYS = N` (hours as a fraction: 6 h is `0.25`).
 - "Before <time>", for example "the 24 h before the 5xx spike at 02:00 UTC": set `WINDOW_END` to that time as ISO UTC (`"2026-11-04T02:00:00Z"`) and `WINDOW_DAYS` to the lookback (`1`). Call that time the **incident time**.
-- A clock time without a timezone: ask for the timezone before running. A wrong timezone shifts the window by hours and can hide the change.
+- A clock time without a timezone: ask for the timezone before running.
+- A spike or incident without a time ("what changed before the 5xx spike on X?"): run the error-spike skill first. Use its `rise_began` + one bucket as `WINDOW_END` and `WINDOW_DAYS = 1`. A wrong timezone shifts the window by hours and can hide the change.
 
 How you call Akamai depends on how the Akamai MCP Server is exposed in this session.
 
