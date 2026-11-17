@@ -1,0 +1,9 @@
+interface:
+  display_name: "Akamai Change History"
+  short_description: "Show what changed on the Property serving a Hostname, when, and who saved it"
+  default_prompt: "Use $change-history to show what changed on this Hostname."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "akamai_mcp_gateway"
+      description: "Akamai Property Manager read tools (hostnames, versions, Activations, rule trees)"
