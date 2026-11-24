@@ -51,7 +51,7 @@ Restart Codex. `agents/openai.yaml` supplies the display name, the default promp
 
 ### Connect the Akamai MCP Server
 
-The Akamai MCP Server is in private beta, so ask your Akamai contact for its URL and credentials. Then register it as a remote MCP server:
+The Akamai MCP Server is in private beta, so ask your Akamai contact for its URL and credentials. Then register it as a remote MCP server named **`akamai-mcp`**:
 
 - **Claude Code:** `claude mcp add --transport http akamai-mcp <server-url>`. Run `/mcp` to check that it's connected.
 - **Codex:** add it to `~/.codex/config.toml`:
@@ -60,6 +60,10 @@ The Akamai MCP Server is in private beta, so ask your Akamai contact for its URL
   [mcp_servers.akamai-mcp]
   url = "<server-url>"
   ```
+
+> **Use the server name `akamai-mcp`.** In `agents/openai.yaml`, the skill declares its MCP dependency by server name (`value: "akamai-mcp"`). Codex matches that name against the `[mcp_servers.<name>]` entries in `config.toml`. If you register the server under another name, either rename the entry to `akamai-mcp` or change `value` in `agents/openai.yaml` to your name.
+>
+> Claude Code doesn't read `agents/openai.yaml`, and `SKILL.md` refers to the server's tools, not its name. Any name works there, but `akamai-mcp` keeps both agents consistent.
 
 ## Usage
 
@@ -89,4 +93,4 @@ Reference IDs translate for **48 hours** only, so run the skill soon after the e
 |---|---|
 | `SKILL.md` | The instructions the agent follows: gather the facts, analyze them, format the output. |
 | `scripts/case_record.py` | Builds the case record inside the Akamai MCP Server's `execute` sandbox, in two runs per ID: start the translation, then build the record. Only its three marked input lines are edited per run. |
-| `agents/openai.yaml` | Codex metadata: display name, default prompt, MCP dependency. |
+| `agents/openai.yaml` | Codex metadata: display name, default prompt, MCP dependency on the server named `akamai-mcp`. |

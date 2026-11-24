@@ -5,5 +5,5 @@ interface:
 dependencies:
   tools:
     - type: "mcp"
-      value: "akamai_mcp_gateway"
+      value: "akamai-mcp"
       description: "Akamai Edge Diagnostics (error translation) and, when available, App & API Protector read tools"
