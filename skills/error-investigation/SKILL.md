@@ -45,7 +45,7 @@ The two runs exist because one run that does both exceeds `execute`'s time limit
 1. **Normalize the ID:** decode HTML entities, strip `Reference #`, and lowercase it.
 2. **Check its age:** the third dot-field is the Unix time of the error. If it's older than 48 h, report it *expired* and stop.
 3. **Translate:** call `ediag_translate_err_str` with `error_code` and `trace_forward_logs: true`.
-4. **Poll:** while the status is `IN_PROGRESS`, wait `retryAfter` seconds, then call `ediag_check_translate_err_status` with `request_id`.
+4. **Poll:** while the status is `IN_PROGRESS`, wait `retryAfter` seconds, then call `ediag_check_translate_err_status` with `request_id`. If the finished `result` holds `noLogsErrorType`, stop: the outcome is `NO_LOGS` (see `build()`), not a record.
 5. **Look up the WAF details** if `wafDetails` is present and the `aap_manage_*` tools exist. Use the same three `"operation": "get"` calls as `waf_block()`. If those tools are missing, keep the IDs parsed from `wafDetails`/`wafDetailsUrl` and leave the names `null`.
 6. **Build the record** with exactly the field mapping in `case_record()`, `edge_logs()`, `decode_status()` and `network_check()`.
 
@@ -59,6 +59,7 @@ Handle each outcome:
 | `EXPIRED`, or `REJECTED` with `expired.field.value` | Reference IDs translate for 48 h only. Report the age and ask for a fresh ID: reproduce the error and copy the new Reference ID. |
 | `NO_REFERENCE_ID` | `REFERENCE_ID` was left as the placeholder. Ask the user for a Reference ID. |
 | `IN_PROGRESS` after polling | Poll `ediag_check_translate_err_status` with the `request_id` again (with `execute`: rerun run 2), then build the record. Don't restart the translation. |
+| `NO_LOGS` | The translation finished, but Edge Diagnostics found no log lines. Report `error.type` and `error.title` verbatim, and don't build or show a case record. For `not.found.logs.rotated`, the logs aren't readable yet: ask the user to rerun the skill with the same ID later, which starts a new translation (run 1), while it's within 48 h. For any other `type`, ask for a fresh ID instead. |
 | `FAILURE`/`REJECTED` with 403 | Give both possible causes: the request was served by a different Account than the connected one, or the API client lacks Edge Diagnostics access. Ask the user which applies. |
 | Other error | Report its `title`/`detail` verbatim. |
 

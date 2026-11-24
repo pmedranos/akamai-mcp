@@ -194,7 +194,13 @@ def build(rid, request_id):
     if d.get("executionStatus") != "SUCCESS":
         return {"reference": rid, "status": d.get("executionStatus"), "request_id": request_id,
                 "error": d.get("errorResponse")}
-    rec = case_record(rid, d.get("result") or {})
+    res = d.get("result") or {}
+    if res.get("noLogsErrorType"):
+        # SUCCESS, but no log lines were found (e.g. "not.found.logs.rotated"). Building a
+        # record here would give Akatec a record with every field null, so report the outcome.
+        return {"reference": rid, "status": "NO_LOGS", "request_id": request_id,
+                "error": {"type": res.get("noLogsErrorType"), "title": res.get("noLogsErrorTitle")}}
+    rec = case_record(rid, res)
     rec["checked_at_epoch"] = int(time.time())
     return rec
 
